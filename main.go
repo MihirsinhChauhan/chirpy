@@ -1,19 +1,34 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"net/http"
 	"sync/atomic"
+
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq" // PostgreSQL driver (side-effect import)
+
+	"chirpy/internal/database" // <-- replace with your module name
 )
 
+// config
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	DB             *database.Queries
+	Platform		string
 }
 
+// request / response types
 type ValidateChirpRequest struct {
 	Body string `json:"body"`
 }
@@ -22,7 +37,7 @@ type ValidateChirpValidResponse struct {
 	Valid bool `json:"valid"`
 }
 
-type ValidateChirpErrorResponse struct {
+type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
@@ -31,7 +46,59 @@ type CleanedChirpResponse struct {
 	CleanedBody string `json:"cleaned_body"`
 }
 
-// New POST /api/validate_chirp
+type CreateUserRequest struct {
+	Email string `json:"email"`
+}
+
+type CreateUserResponse struct {
+	ID uuid.UUID `json:"id"`
+	Email string `json:"email"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+
+}
+
+// Post /api/user - creat user via sqlc
+func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	var req CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err !=nil {
+		respondWithError(w, http.StatusBadRequest,"Invalid JSON")
+		return
+	}
+
+	if req.Email == "" {
+		respondWithError(w,http.StatusBadRequest, "Email is required")
+		return 
+	}
+
+	ctx := context.Background()
+	user, err := cfg.DB.CreateUser(ctx, req.Email)
+	if err != nil {
+		// Handle unique constraint violation
+		if strings.Contains(err.Error(), "duplicate key") {
+			respondWithError(w, http.StatusConflict, "Email already exists")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Failed to create user")
+		return
+	}
+	resp := CreateUserResponse{
+		ID:        user.ID,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: user.UpdatedAt.Format(time.RFC3339),
+	}
+
+	respondWithJSON(w, http.StatusCreated, resp)
+}
+
+
+// POST /api/validate_chirp
 func (cfg *apiConfig) handlerValidatecChirp(w http.ResponseWriter, r *http.Request) {
 	// only Post
 	if r.Method != http.MethodPost {
@@ -100,7 +167,7 @@ func cleanProfanity(s string) string {
 
 // helper
 func respondWithError(w http.ResponseWriter,code int, msg string) {
-	res := ValidateChirpErrorResponse{Error:msg}
+	res := ErrorResponse{Error:msg}
 	respondWithJSON(w, code, res)
 }
 
@@ -136,20 +203,59 @@ func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
-	// Reset the counter to 0
+	// Only allow in dev
+	if cfg.Platform != "dev" {
+		respondWithError(w, http.StatusForbidden, "Forbidden: reset only allowed in dev")
+		return
+	}
+
+	ctx := context.Background()
+	if err := cfg.DB.DeleteAllUsers(ctx); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to reset users")
+		return
+	}
+
+	// Reset metrics too
 	cfg.fileserverHits.Store(0)
-	// Set Content-Type header
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// Write 200 OK status
 	w.WriteHeader(http.StatusOK)
-	// Write a simple confirmation
-	w.Write([]byte("Counter reset"))
+	w.Write([]byte("Users and hits reset"))
 }
 
 func main() {
+	if err:= godotenv.Load() ; err!=nil {
+		log.Fatal("error loading .env ")
+	}
+
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URl is not in env")
+	}
+	platform := os.Getenv("PLATFORM")
+	if platform == "" {
+		log.Fatal("PLATFORM not set in .env")
+	}
+
+	// Open DB
+	db, err := sql.Open("postgres",dbURL)
+	if err != nil {
+		log.Fatalf("sql.Open: %v" , err)
+	}
+	defer db.Close()
+
+	if err = db.Ping(); err != nil {
+		log.Fatalf("db.Ping: %v", err)
+	}
+
+	// SQLC Queries
+	dbQueries := database.New(db)
+
 	// Initialize apiConfig
 	apiCfg := &apiConfig{
 		fileserverHits: atomic.Int32{},
+		DB: dbQueries,
+		Platform: platform,
 	}
 
 	// Create a new ServeMux
@@ -176,6 +282,7 @@ func main() {
 
 	// Register /validate_chirp endpoint
 	mux.HandleFunc("POST /api/validate_chirp", apiCfg.handlerValidatecChirp)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 
 	// Create a new Server with the mux as handler and address set to :8080
 	server := &http.Server{
@@ -184,5 +291,6 @@ func main() {
 	}
 
 	// Start the server
-	server.ListenAndServe()
+	log.Println("Server starting on :8080")
+	log.Fatal(server.ListenAndServe())
 }
