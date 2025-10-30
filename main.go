@@ -185,6 +185,46 @@ func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request
 
 }
 
+func (cfg *apiConfig) handlerGetChirpByID(w http.ResponseWriter,r *http.Request) {
+	if r.Method != http.MethodGet {
+        respondWithError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+        return
+    }
+
+	idStr := r.PathValue("chirpID")
+    if idStr == "" {
+        respondWithError(w, http.StatusBadRequest, "Missing chirp ID")
+        return
+    }
+
+	chirpID, err := uuid.Parse(idStr)
+    if err != nil {
+        respondWithError(w, http.StatusBadRequest, "Invalid chirp ID")
+        return
+    }
+
+	ctx := context.Background()
+    dbChirp, err := cfg.DB.GetChirpByID(ctx, chirpID)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            respondWithError(w, http.StatusNotFound, "Chirp not found")
+            return
+        }
+        respondWithError(w, http.StatusInternalServerError, "Failed to retrieve chirp")
+        return
+    }
+
+	resp := ChirpsResponse{
+        ID:        dbChirp.ID,
+        CreatedAt: dbChirp.CreatedAt.Format(time.RFC3339),
+        UpdatedAt: dbChirp.UpdatedAt.Format(time.RFC3339),
+        Body:      dbChirp.Body,
+        UserID:    dbChirp.UserID,
+    }
+
+    respondWithJSON(w, http.StatusOK, resp)
+}
+
 // helper
 func cleanProfanity(s string) string {
 	profane := map[string]bool{
@@ -346,6 +386,7 @@ func main() {
 	// Register /chirps endpoint
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirps)
 	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetAllChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
 
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 
