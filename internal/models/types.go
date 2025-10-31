@@ -7,9 +7,22 @@ import (
 
 type CreateUserRequest struct {
 	Email string `json:"email"`
+	Password string `json:"password"`
 }
 
 type CreateUserResponse struct {
+	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
+	CreatedAt string    `json:"created_at"`
+	UpdatedAt string    `json:"updated_at"`
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
 	ID        uuid.UUID `json:"id"`
 	Email     string    `json:"email"`
 	CreatedAt string    `json:"created_at"`

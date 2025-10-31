@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"chirpy/internal/api"
+	"chirpy/internal/auth"
+	"chirpy/internal/database"
 	"chirpy/internal/logger"
 	"chirpy/internal/models"
 	"chirpy/internal/utils"
@@ -40,8 +42,26 @@ func HandleCreateUser(cfg *api.Config) http.HandlerFunc {
 			return
 		}
 
+		if req.Password == "" {
+			logger.Logger.Warnw("Empty Password Supplied")
+			utils.RespondWithError(w, http.StatusBadRequest, "Password is required")
+		}
+
+		hash, err := auth.HashPassword(req.Password)
+
+		if err != nil {
+			logger.Logger.Errorw("Failed to hash password", "error", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, "Failed to process password")
+			return
+		}
+
+
+
 		ctx := context.Background()
-		user, err := cfg.DB.CreateUser(ctx, req.Email)
+		user, err := cfg.DB.CreateUser(ctx, database.CreateUserParams{
+			Email: req.Email,
+			HashedPassword: hash,
+		})
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate key") {
 				logger.Logger.Warnw("Duplicate email attempt",
