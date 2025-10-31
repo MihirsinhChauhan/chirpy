@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
+	"crypto/rand"
+	"encoding/hex"
 	"github.com/alexedwards/argon2id"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -56,14 +57,14 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		// jwt-go classifies many errors – we log the root cause
 		logger.Logger.Errorw("jwt parsing failed",
 			"error", err,
-			"token_preview", truncateToken(tokenString),
+			"token_preview", TruncateToken(tokenString),
 		)
 		return uuid.Nil, err
 	}
 
 	if !token.Valid {
 		logger.Logger.Infow("jwt token is invalid (expired, malformed, etc.)",
-			"token_preview", truncateToken(tokenString),
+			"token_preview", TruncateToken(tokenString),
 		)
 		return uuid.Nil, jwt.ErrTokenExpired
 	}
@@ -82,7 +83,7 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 }
 
 // truncateToken returns first 12 chars of the token for safe logging.
-func truncateToken(token string) string {
+func TruncateToken(token string) string {
 	if len(token) > 12 {
 		return token[:12] + "..."
 	}
@@ -107,4 +108,14 @@ func GetBearerToken(headers http.Header) (string, error) {
 	}
 
 	return token, nil
+}
+
+func MakeRefreshToken() (string, error) {
+	b:= make([]byte, 32)
+
+	_, err := rand.Read(b)
+	if err!= nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

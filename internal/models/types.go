@@ -20,7 +20,6 @@ type CreateUserResponse struct {
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	ExpiresInSeconds  *int   `json:"expires_in_seconds,omitempty"` // optional
 }
 
 type LoginResponse struct {
@@ -29,6 +28,7 @@ type LoginResponse struct {
 	CreatedAt string    `json:"created_at"`
 	UpdatedAt string    `json:"updated_at"`
 	Token 	  string    `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type ChirpRequest struct {
