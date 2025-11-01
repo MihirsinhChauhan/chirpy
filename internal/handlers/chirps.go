@@ -11,8 +11,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -121,6 +123,11 @@ func HandleGetAllChirps(cfg *api.Config) http.HandlerFunc {
 			return
 		}
 
+		sortOrder := r.URL.Query().Get("sort")
+		if sortOrder == "" {
+			sortOrder = "asc"
+		}
+
 		ctx := context.Background()
 		dbChirps, err := cfg.DB.GetAllChirps(ctx)
 		if err != nil {
@@ -130,6 +137,20 @@ func HandleGetAllChirps(cfg *api.Config) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, "Failed to retrieve chirps")
 			return
 		}
+
+		sort.Slice(dbChirps, func(i, j int) bool {
+		if sortOrder == "desc" {
+			if dbChirps[i].CreatedAt.Equal(dbChirps[j].CreatedAt) {
+				return dbChirps[i].ID.String() > dbChirps[j].ID.String()
+			}
+			return dbChirps[i].CreatedAt.After(dbChirps[j].CreatedAt)
+		}
+		// asc
+		if dbChirps[i].CreatedAt.Equal(dbChirps[j].CreatedAt) {
+			return dbChirps[i].ID.String() < dbChirps[j].ID.String()
+		}
+		return dbChirps[i].CreatedAt.Before(dbChirps[j].CreatedAt)
+	})
 
 		chirps := make([]models.ChirpResponse, len(dbChirps))
 		for i, c := range dbChirps {
